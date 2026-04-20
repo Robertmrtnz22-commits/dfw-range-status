@@ -217,7 +217,6 @@ body{background:#0f1a0f;color:#e8f0e8;font-family:'DM Sans',sans-serif;min-heigh
 .sc.limited{color:#f0c040;border:1px solid #4a4a10}
 .sc.closed{color:#f05050;border:1px solid #4a1a1a}
 .sc.unknown{color:#8aaa8a;border:1px solid #2a3a2a}
-.sc.saved{color:#e060a0;border:1px solid #4a1a3a}
 .add-btn{background:#3a6a3a;color:#fff;border:none;border-radius:20px;padding:5px 12px;font-size:13px;font-weight:700;cursor:pointer;margin-left:auto;transition:background .2s}
 .add-btn:hover{background:#4a8a4a}
 
@@ -404,7 +403,6 @@ export default function App() {
     return stored ? JSON.parse(stored) : seedBusy();
   });
   const [accuracy, setAcc]    = useState(seedAccuracy);
-  const [favorites, setFavs]  = useState(() => new Set());
   const [alerts, setAlerts]   = useState({});
   const [reports, setReports] = useState(7);
   const [streak]              = useState(3);
@@ -431,18 +429,6 @@ export default function App() {
     toastRef.current = setTimeout(() => setToast(null), 6000);
   }
 
-  function toggleFav(cid) {
-    setFavs(prev => {
-      const next = new Set(prev);
-      if (next.has(cid)) { next.delete(cid); }
-      else {
-        next.add(cid);
-        showToast(`❤️ ${COURSES.find(c => c.id === cid).name} saved!`);
-      }
-      return next;
-    });
-  }
-
   function openVoteModal(cid, type, val) {
     setVoteModal({ cid, type, val });
     setNoteText('');
@@ -454,7 +440,6 @@ export default function App() {
     const course = COURSES.find(c => c.id === cid);
 
     if (type === 'status') {
-      const prev = getStatus(votes[cid]);
       setVotes(p => {
         const updated = {
           ...p,
@@ -463,10 +448,6 @@ export default function App() {
         localStorage.setItem('votes', JSON.stringify(updated));
         return updated;
       });
-      if (favorites.has(cid) && prev !== val) {
-        const lbl = { open: '✅ Open', limited: '⚠️ Limited', closed: '⛔ Closed' }[val];
-        showToast(`🔔 ${course.name} is now ${lbl}!`);
-      }
     } else if (type === 'surface') {
       setSurface(p => {
         const updated = { ...p, [cid]: { ...p[cid], [val]: p[cid][val] + 1, userVote: val } };
@@ -576,9 +557,7 @@ export default function App() {
           </div>
           <div className="card-actions-right">
             <div className="action-buttons">
-              <button className="icon-btn" onClick={() => toggleFav(course.id)} title="Favorite">
-                {favorites.has(course.id) ? '❤️' : '🤍'}
-              </button>
+
               <button className="icon-btn" onClick={() => { setAlertModal(course.id); setAlertEmail(alerts[course.id] || ''); }} title="Alert">
                 {alerts[course.id] ? '🔔' : '🔕'}
               </button>
@@ -664,7 +643,7 @@ export default function App() {
   const displayCourses = (() => {
     const query = searchQuery.trim();
     
-    // If searching, always search all courses (not restricted by tab/favorites)
+    // If searching, always search all courses
     if (query) {
       if (isZipCodeQuery(query)) {
         // Search is a zip code - show ranges within 20 miles
@@ -680,10 +659,6 @@ export default function App() {
     
     // No search query - respect tab selection
     searchContext.current = { type: null, zipCode: null };
-    if (tab === 'favorites') {
-      return COURSES.filter(c => favorites.has(c.id));
-    }
-    
     return COURSES;
   })();
 
@@ -723,26 +698,24 @@ export default function App() {
             <span className="sc limited">⚠️ {statusCounts.limited||0} Ltd</span>
             <span className="sc closed">⛔ {statusCounts.closed||0} Closed</span>
             <span className="sc unknown">❓ {statusCounts.unknown||0} ?</span>
-            <span className="sc saved">❤️ {favorites.size}</span>
             <button className="add-btn" onClick={() => setAddModal(true)}>+ Add Range</button>
           </div>
         </header>
 
         {/* TABS */}
         <nav className="tabs">
-          <button className={`tab-btn${tab==='ranges'    ? ' active':''}`} onClick={() => setTab('ranges')}>⛳ Ranges</button>
-          <button className={`tab-btn${tab==='favorites' ? ' active':''}`} onClick={() => setTab('favorites')}>❤️ Saved</button>
-          <button className={`tab-btn${tab==='alerts'    ? ' active':''}`} onClick={() => setTab('alerts')}>
+          <button className={`tab-btn${tab==='ranges'  ? ' active':''}`} onClick={() => setTab('ranges')}>⛳ Ranges</button>
+          <button className={`tab-btn${tab==='alerts'  ? ' active':''}`} onClick={() => setTab('alerts')}>
             🔔{Object.keys(alerts).length>0 ? ` (${Object.keys(alerts).length})`:''}
           </button>
-          <button className={`tab-btn${tab==='profile'   ? ' active':''}`} onClick={() => setTab('profile')}>My Stats</button>
+          <button className={`tab-btn${tab==='profile' ? ' active':''}`} onClick={() => setTab('profile')}>My Stats</button>
         </nav>
 
         {/* CONTENT */}
         <div className="tab-content">
 
-          {/* SEARCH BOX - RANGES & FAVORITES TABS */}
-          {(tab==='ranges'||tab==='favorites') && (
+          {/* SEARCH BOX - RANGES */}
+          {tab==='ranges' && (
             <div style={{padding:'12px',borderBottom:'1px solid #2a3a2a'}}>
               <input 
                 type="text" 
@@ -768,14 +741,14 @@ export default function App() {
             </div>
           )}
 
-          {/* RANGES / FAVORITES */}
-          {(tab==='ranges'||tab==='favorites') && (
+          {/* RANGES */}
+          {tab==='ranges' && (
             <div className="cards-list">
               {displayCourses.length===0 && (
                 <div className="empty">
-                  <div className="empty-icon">❤️</div>
-                  <div className="empty-title">No Saved Ranges</div>
-                  <div>Tap the heart on any range to save it here</div>
+                  <div className="empty-icon">⛳</div>
+                  <div className="empty-title">No Ranges Found</div>
+                  <div>Try searching by course name, city, or zip code.</div>
                 </div>
               )}
               {displayCourses.map(c => renderCard(c))}
@@ -841,7 +814,6 @@ export default function App() {
                   {val:reports,                    lbl:'Reports Filed'},
                   {val:streak,                     lbl:'Day Streak'},
                   {val:`${userAccPct}%`,            lbl:'Your Accuracy'},
-                  {val:favorites.size,             lbl:'Saved Ranges'},
                   {val:Object.keys(alerts).length, lbl:'Active Alerts'},
                   {val:cities.size,                lbl:'Cities Covered'},
                 ].map((s,i) => (
