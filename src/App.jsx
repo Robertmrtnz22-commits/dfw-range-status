@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { supabase } from './supabase.js';
 
 const COURSES = [
   { id: 1,  name: 'Tour 18 Golf Course',       city: 'Flower Mound',         phone: '(972) 355-8920', rating: 4.5, zip: '75022' },
@@ -366,6 +367,12 @@ body{background:#0f1a0f;color:#e8f0e8;font-family:'DM Sans',sans-serif;min-heigh
 .mbtn.no{background:#2a0808;color:#f05050;border:1px solid #5a1a1a}
 .mbtn.no:hover{background:#3a0a0a}
 
+/* LOADING */
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:14px;color:#5a7a5a}
+.spinner{width:32px;height:32px;border:3px solid #2a3a2a;border-top-color:#7ecb7e;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-txt{font-size:13px;font-weight:600;color:#5a7a5a}
+
 /* TOAST */
 .toast{position:fixed;top:0;left:50%;transform:translateX(-50%);background:#1a3a1a;border:1px solid #3a7a3a;color:#7ecb7e;padding:12px 20px;border-radius:0 0 14px 14px;font-size:14px;font-weight:700;z-index:300;max-width:460px;width:calc(100% - 24px);text-align:center;animation:slideDown .3s ease-out;box-shadow:0 4px 20px rgba(0,0,0,.5)}
 @keyframes slideDown{from{transform:translateX(-50%) translateY(-100%);opacity:0}to{transform:translateX(-50%) translateY(0);opacity:1}}
@@ -378,36 +385,16 @@ body{background:#0f1a0f;color:#e8f0e8;font-family:'DM Sans',sans-serif;min-heigh
 
 export default function App() {
   const [tab, setTab]         = useState('ranges');
-  const [votes, setVotes]     = useState(() => {
-    const today = getToday();
-    const lastReset = localStorage.getItem('lastReset');
-    if (lastReset !== today) {
-      localStorage.setItem('lastReset', today);
-      return seedVotes();
-    }
-    const stored = localStorage.getItem('votes');
-    return stored ? JSON.parse(stored) : seedVotes();
-  });
-  const [surface, setSurface] = useState(() => {
-    const today = getToday();
-    const lastReset = localStorage.getItem('lastReset');
-    if (lastReset !== today) return seedSurface();
-    const stored = localStorage.getItem('surface');
-    return stored ? JSON.parse(stored) : seedSurface();
-  });
-  const [busy, setBusy]       = useState(() => {
-    const today = getToday();
-    const lastReset = localStorage.getItem('lastReset');
-    if (lastReset !== today) return seedBusy();
-    const stored = localStorage.getItem('busy');
-    return stored ? JSON.parse(stored) : seedBusy();
-  });
+  const [votes, setVotes]     = useState(seedVotes);
+  const [surface, setSurface] = useState(seedSurface);
+  const [busy, setBusy]       = useState(seedBusy);
   const [accuracy, setAcc]    = useState(seedAccuracy);
   const [alerts, setAlerts]   = useState({});
   const [reports, setReports] = useState(7);
   const [streak]              = useState(3);
   const [cities, setCities]   = useState(() => new Set(['Dallas', 'Allen']));
 
+  const [loading,      setLoading]      = useState(true);
   const [voteModal,    setVoteModal]    = useState(null);
   const [noteText,     setNoteText]     = useState('');
   const [accModal,     setAccModal]     = useState(null);
@@ -419,6 +406,79 @@ export default function App() {
   const [searchQuery,  setSearchQuery]  = useState('');
   const [toast,        setToast]        = useState(null);
   const toastRef = useRef(null);
+
+  // Load all data from Supabase on mount
+  useEffect(() => {
+    async function loadAll() {
+      setLoading(true);
+      try {
+        const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+        const [votesRes, surfRes, busyRes, accRes] = await Promise.all([
+          supabase.from('votes').select('*').gte('created_at', fourHoursAgo).order('created_at', { ascending: false }),
+          supabase.from('surface_votes').select('*').order('created_at', { ascending: false }),
+          supabase.from('busy_votes').select('*').order('created_at', { ascending: false }),
+          supabase.from('accuracy_feedback').select('*'),
+        ]);
+
+        // Aggregate status votes
+        if (votesRes.data && votesRes.data.length > 0) {
+          const agg = seedVotes();
+          votesRes.data.forEach(row => {
+            if (!agg[row.course_id]) return;
+            if (row.type === 'open')    agg[row.course_id].open++;
+            else if (row.type === 'limited') agg[row.course_id].limited++;
+            else if (row.type === 'closed')  agg[row.course_id].closed++;
+            const ts = new Date(row.created_at).getTime();
+            if (!agg[row.course_id].lastVote || ts > agg[row.course_id].lastVote) {
+              agg[row.course_id].lastVote = ts;
+              if (row.note) agg[row.course_id].note = row.note;
+            }
+          });
+          setVotes(agg);
+        }
+
+        // Aggregate surface votes
+        if (surfRes.data && surfRes.data.length > 0) {
+          const agg = seedSurface();
+          surfRes.data.forEach(row => {
+            if (!agg[row.course_id]) return;
+            if (row.type === 'grass') agg[row.course_id].grass++;
+            else if (row.type === 'mats') agg[row.course_id].mats++;
+          });
+          setSurface(agg);
+        }
+
+        // Aggregate busy votes
+        if (busyRes.data && busyRes.data.length > 0) {
+          const agg = seedBusy();
+          busyRes.data.forEach(row => {
+            if (!agg[row.course_id]) return;
+            if (row.type === 'empty')    agg[row.course_id].empty++;
+            else if (row.type === 'moderate') agg[row.course_id].moderate++;
+            else if (row.type === 'packed')   agg[row.course_id].packed++;
+          });
+          setBusy(agg);
+        }
+
+        // Aggregate accuracy feedback — fall back to seed if empty
+        if (accRes.data && accRes.data.length > 0) {
+          const agg = {};
+          COURSES.forEach(c => { agg[c.id] = { correct: 0, total: 0, userFeedback: null }; });
+          accRes.data.forEach(row => {
+            if (!agg[row.course_id]) return;
+            agg[row.course_id].total++;
+            if (row.was_accurate) agg[row.course_id].correct++;
+          });
+          setAcc(agg);
+        }
+      } catch (err) {
+        console.error('Supabase load error:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadAll();
+  }, []);
 
   // Track search context for displaying distances
   const searchContext = useRef({ type: null, zipCode: null });
@@ -434,31 +494,28 @@ export default function App() {
     setNoteText('');
   }
 
-  function confirmVote() {
+  async function confirmVote() {
     if (!voteModal) return;
     const { cid, type, val } = voteModal;
     const course = COURSES.find(c => c.id === cid);
 
     if (type === 'status') {
-      setVotes(p => {
-        const updated = {
-          ...p,
-          [cid]: { ...p[cid], [val]: p[cid][val] + 1, lastVote: Date.now(), note: noteText || p[cid].note, userVote: val }
-        };
-        localStorage.setItem('votes', JSON.stringify(updated));
-        return updated;
+      setVotes(p => ({
+        ...p,
+        [cid]: { ...p[cid], [val]: p[cid][val] + 1, lastVote: Date.now(), note: noteText || p[cid].note, userVote: val }
+      }));
+      supabase.from('votes').insert({ course_id: cid, type: val, note: noteText || null }).then(({ error }) => {
+        if (error) console.error('Insert vote error:', error);
       });
     } else if (type === 'surface') {
-      setSurface(p => {
-        const updated = { ...p, [cid]: { ...p[cid], [val]: p[cid][val] + 1, userVote: val } };
-        localStorage.setItem('surface', JSON.stringify(updated));
-        return updated;
+      setSurface(p => ({ ...p, [cid]: { ...p[cid], [val]: p[cid][val] + 1, userVote: val } }));
+      supabase.from('surface_votes').insert({ course_id: cid, type: val }).then(({ error }) => {
+        if (error) console.error('Insert surface error:', error);
       });
     } else {
-      setBusy(p => {
-        const updated = { ...p, [cid]: { ...p[cid], [val]: p[cid][val] + 1, userVote: val } };
-        localStorage.setItem('busy', JSON.stringify(updated));
-        return updated;
+      setBusy(p => ({ ...p, [cid]: { ...p[cid], [val]: p[cid][val] + 1, userVote: val } }));
+      supabase.from('busy_votes').insert({ course_id: cid, type: val }).then(({ error }) => {
+        if (error) console.error('Insert busy error:', error);
       });
     }
 
@@ -472,12 +529,19 @@ export default function App() {
       ...p,
       [cid]: { correct: ok ? p[cid].correct + 1 : p[cid].correct, total: p[cid].total + 1, userFeedback: ok ? 'yes' : 'no' }
     }));
+    supabase.from('accuracy_feedback').insert({ course_id: cid, was_accurate: ok }).then(({ error }) => {
+      if (error) console.error('Insert accuracy error:', error);
+    });
     setAccModal(null);
   }
 
   function subscribeAlert(cid) {
     if (!alertEmail.trim()) return;
-    setAlerts(p => ({ ...p, [cid]: alertEmail.trim() }));
+    const email = alertEmail.trim();
+    setAlerts(p => ({ ...p, [cid]: email }));
+    supabase.from('subscriptions').insert({ course_id: cid, email }).then(({ error }) => {
+      if (error) console.error('Insert subscription error:', error);
+    });
     setAlertModal(null);
     setAlertEmail('');
     showToast(`🔔 Alert set for ${COURSES.find(c => c.id === cid).name}!`);
@@ -742,7 +806,13 @@ export default function App() {
           )}
 
           {/* RANGES */}
-          {tab==='ranges' && (
+          {tab==='ranges' && loading && (
+            <div className="loading">
+              <div className="spinner"/>
+              <div className="loading-txt">Loading range data…</div>
+            </div>
+          )}
+          {tab==='ranges' && !loading && (
             <div className="cards-list">
               {displayCourses.length===0 && (
                 <div className="empty">
