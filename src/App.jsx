@@ -410,6 +410,7 @@ export default function App() {
   // Load all data from Supabase on mount
   useEffect(() => {
     async function loadAll() {
+      if (!supabase) { setLoading(false); return; }
       setLoading(true);
       try {
         const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
@@ -504,17 +505,17 @@ export default function App() {
         ...p,
         [cid]: { ...p[cid], [val]: p[cid][val] + 1, lastVote: Date.now(), note: noteText || p[cid].note, userVote: val }
       }));
-      supabase.from('votes').insert({ course_id: cid, type: val, note: noteText || null }).then(({ error }) => {
+      if (supabase) supabase.from('votes').insert({ course_id: cid, type: val, note: noteText || null }).then(({ error }) => {
         if (error) console.error('Insert vote error:', error);
       });
     } else if (type === 'surface') {
       setSurface(p => ({ ...p, [cid]: { ...p[cid], [val]: p[cid][val] + 1, userVote: val } }));
-      supabase.from('surface_votes').insert({ course_id: cid, type: val }).then(({ error }) => {
+      if (supabase) supabase.from('surface_votes').insert({ course_id: cid, type: val }).then(({ error }) => {
         if (error) console.error('Insert surface error:', error);
       });
     } else {
       setBusy(p => ({ ...p, [cid]: { ...p[cid], [val]: p[cid][val] + 1, userVote: val } }));
-      supabase.from('busy_votes').insert({ course_id: cid, type: val }).then(({ error }) => {
+      if (supabase) supabase.from('busy_votes').insert({ course_id: cid, type: val }).then(({ error }) => {
         if (error) console.error('Insert busy error:', error);
       });
     }
@@ -529,7 +530,7 @@ export default function App() {
       ...p,
       [cid]: { correct: ok ? p[cid].correct + 1 : p[cid].correct, total: p[cid].total + 1, userFeedback: ok ? 'yes' : 'no' }
     }));
-    supabase.from('accuracy_feedback').insert({ course_id: cid, was_accurate: ok }).then(({ error }) => {
+    if (supabase) supabase.from('accuracy_feedback').insert({ course_id: cid, was_accurate: ok }).then(({ error }) => {
       if (error) console.error('Insert accuracy error:', error);
     });
     setAccModal(null);
@@ -539,7 +540,7 @@ export default function App() {
     if (!alertEmail.trim()) return;
     const email = alertEmail.trim();
     setAlerts(p => ({ ...p, [cid]: email }));
-    supabase.from('subscriptions').insert({ course_id: cid, email }).then(({ error }) => {
+    if (supabase) supabase.from('subscriptions').insert({ course_id: cid, email }).then(({ error }) => {
       if (error) console.error('Insert subscription error:', error);
     });
     setAlertModal(null);
